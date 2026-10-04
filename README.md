@@ -23,6 +23,7 @@ scripts/
   package-tablet.ps1          builds dist/xovi-nytcrossword-runtime.zip
   update-remarkable.ps1       builds both and deploys them over SSH
 config.example.env            template for the tablet's config.env
+scripts/nytcrwd.py             standalone Python PDF downloader (not wired to AppLoad)
 tests/test_appload.py
 ```
 
@@ -47,6 +48,28 @@ On the tablet, copy `config.example.env` to
 `/home/root/xovi-nytcrossword/config.env` and set `NYT_S_COOKIE`. The backend
 parses `KEY=value` lines and never sources the file. Packages never contain
 `config.env` or `state/`, so redeploying keeps your settings.
+
+### Standalone Python downloader
+
+The optional Python script downloads and merges PDFs, then uploads them using
+an installed `rmapi` CLI. It is separate from the AppLoad boilerplate and is not
+included in tablet packages.
+
+Copy `config.example.env` to `config.env` at the repository root. Set
+`NYT_S_COOKIE` (the session value only), or `NYT_COOKIE` (the full Cookie header).
+Optionally set `RMAPI_PATH` and `RMAPI_FOLDER` for your local upload destination.
+Values are plain text without surrounding quotes. Personal values belong only
+in the Git-ignored `config.env`, never in the example or source code.
+
+```powershell
+python -m pip install -r requirements.txt
+python .\scripts\nytcrwd.py 7
+python .\scripts\nytcrwd.py 7 --config .\config.env
+```
+
+`NYTCROSSWORD_CONFIG` can also select the config file. Credentials are no longer
+accepted as command-line arguments, avoiding exposure in shell history and
+process listings.
 
 ## Build and deploy
 
@@ -74,8 +97,12 @@ Runtime requirements on the tablet:
 
 ## Tests
 
-Shell backend tests need a POSIX `sh`, so run the suite from WSL:
+Install the standalone downloader's dependencies from `requirements.txt` first.
+Run the tests with:
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
+
+Shell backend tests need a POSIX `sh` and are skipped on Windows; run those under
+WSL. The Python config tests use dummy credentials and do not make NYT requests.

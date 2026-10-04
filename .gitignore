@@ -3,4 +3,6 @@ __pycache__/
 .venv/
 dist/
 config.env
+config.env.*
+!config.example.env
 state/
