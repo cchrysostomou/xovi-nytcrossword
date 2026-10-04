@@ -4,14 +4,14 @@ pkgver=0.3.0
 pkgrel=0
 upstream_author="cchrysostomou"
 category="apps"
-pkgdesc="Download and import NYT crosswords through AppLoad"
+pkgdesc="Access your NYT crossword puzzle account from remarkable. Download puzzles to your device"
 url="https://github.com/cchrysostomou/xovi-nytcrossword"
 arch="aarch64"
 license="MIT Apache-2.0 Zlib BSD-3-Clause IJG BSD-2-Clause GPL-3.0-or-later WITH GCC-exception-3.1"
 depends="appload qt-command-executor librarian curl jq remarkable-os>=3.28 remarkable-os<3.29"
 options="!fhs !strip"
 _commit="@COMMIT@"
-readmeurl="$url/raw/$_commit/README.md"
+readmeurl="https://raw.githubusercontent.com/$upstream_author/$pkgname/$_commit/README.md"
 source="@SOURCE@"
 builddir="$srcdir"
 
