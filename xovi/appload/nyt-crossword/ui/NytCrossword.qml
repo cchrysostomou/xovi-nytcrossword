@@ -172,6 +172,7 @@ Rectangle {
             settingsLoaded = true;
             folderInput.text = result.folder;
             timeoutInput.text = result.broker_timeout;
+            quickDownloadInput.checked = result.include_quick_download;
             configured = !!result.configured;
             cookieInput.text = "";
             status = action === "settings-apply" ? "Settings saved" : "Settings loaded";
@@ -272,7 +273,8 @@ Rectangle {
             run(["settings-apply"], "settings-apply");
         };
         request.send("CROSSWORD_FOLDER=" + folder + "\nBROKER_TIMEOUT_S=" +
-                     timeoutInput.text + "\nNYT_S_COOKIE=" + cookie + "\n");
+                     timeoutInput.text + "\nNYT_S_COOKIE=" + cookie +
+                     "\nINCLUDE_QUICK_DOWNLOAD=" + quickDownloadInput.checked + "\n");
     }
 
     AsyncCommandExecutor {
@@ -556,6 +558,13 @@ Rectangle {
             font.pixelSize: 22
             enabled: !app.busy
             inputMethodHints: Qt.ImhDigitsOnly
+        }
+        CheckBox {
+            id: quickDownloadInput
+            text: "Include Quick Download button"
+            checked: true
+            enabled: !app.busy && app.settingsLoaded
+            font.pixelSize: 22
         }
         Row {
             spacing: 20

@@ -182,6 +182,7 @@ class ShellBackendTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertTrue(payload["configured"])
             self.assertEqual(payload["folder"], "/Puzzles")
+            self.assertTrue(payload["include_quick_download"])
             self.assertNotIn("private-value", json.dumps(payload))
             self.assertIn("NYT_S_COOKIE=private-value", config.read_text())
             self.assertIn("MB_IN_PATH=/run/custom", config.read_text())
@@ -197,6 +198,79 @@ class ShellBackendTests(unittest.TestCase):
             self.assertNotIn("replacement", json.dumps(payload))
             self.assertIn("NYT_S_COOKIE=replacement", config.read_text())
             self.assertNotIn("private-value", config.read_text())
+
+    def test_quick_download_preference_defaults_and_round_trips(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.env"
+            state = root / "state"
+            env = {"NYTCROSSWORD_STATE_DIR": str(state)}
+            code, payload = run_backend("settings", config=config, extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["include_quick_download"])
+            for value in ("false", None, "true"):
+                draft = state / "settings-draft.env"
+                draft.write_text(
+                    "CROSSWORD_FOLDER=/Crosswords\nBROKER_TIMEOUT_S=30\n"
+                    + (f"INCLUDE_QUICK_DOWNLOAD={value}\n" if value else ""),
+                    encoding="utf-8")
+                code, payload = run_backend(
+                    "settings-apply", config=config, extra_env=env)
+                self.assertEqual(code, 0)
+                self.assertEqual(payload["include_quick_download"], value == "true")
+                saved = config.read_text()
+                self.assertEqual(saved.count("INCLUDE_QUICK_DOWNLOAD="), 1)
+                self.assertIn(
+                    "INCLUDE_QUICK_DOWNLOAD=" + ("true" if value == "true" else "false"),
+                    saved)
+                if value != "true":
+                    code, payload = run_backend(
+                        "quick-status", config=config, extra_env=env)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(payload, {
+                        "ok": True, "include_quick_download": False})
+
+    def test_quick_status_defaults_to_enabled_and_checks_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = self.create_inventory_library(root)
+            env = {"NYTCROSSWORD_LIBRARY_DIR": str(library),
+                   "NYTCROSSWORD_STATE_DIR": str(root / "state")}
+            code, payload = run_backend("quick-status", extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["include_quick_download"])
+            self.assertEqual(payload["dates"][0]["date"], date.today().isoformat())
+            config = root / "config.env"
+            config.write_text("INCLUDE_QUICK_DOWNLOAD=true\n", encoding="utf-8")
+            code, payload = run_backend("quick-status", config=config, extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertTrue(payload["include_quick_download"])
+            config.write_text("INCLUDE_QUICK_DOWNLOAD=false\n", encoding="utf-8")
+            code, payload = run_backend("today-status", config=config, extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["dates"][0]["date"], date.today().isoformat())
+
+    def test_invalid_quick_download_preference_is_reported_without_saving(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "config.env"
+            config.write_text("INCLUDE_QUICK_DOWNLOAD=false\n", encoding="utf-8")
+            state = root / "state"
+            state.mkdir()
+            env = {"NYTCROSSWORD_STATE_DIR": str(state)}
+            (state / "settings-draft.env").write_text(
+                "CROSSWORD_FOLDER=/Crosswords\nBROKER_TIMEOUT_S=30\n"
+                "INCLUDE_QUICK_DOWNLOAD=invalid\n", encoding="utf-8")
+            code, payload = run_backend(
+                "settings-apply", config=config, extra_env=env)
+            self.assertNotEqual(code, 0)
+            self.assertEqual(payload["error"], "invalid_config")
+            self.assertEqual(config.read_text(), "INCLUDE_QUICK_DOWNLOAD=false\n")
+            config.write_text("INCLUDE_QUICK_DOWNLOAD=invalid\n", encoding="utf-8")
+            for command in ("quick-status", "settings"):
+                code, payload = run_backend(command, config=config, extra_env=env)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(payload["error"], "invalid_config")
 
     def test_invalid_settings_do_not_change_saved_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -221,7 +295,7 @@ class ShellBackendTests(unittest.TestCase):
         code, payload = run_backend("version")
         self.assertEqual(code, 0)
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["version"], "0.2.0")
+        self.assertEqual(payload["version"], "0.3.0")
 
     def test_status_is_unconfigured_without_cookie(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -511,14 +585,23 @@ class ShellBackendTests(unittest.TestCase):
 class AppLoadAppTests(unittest.TestCase):
     def test_quick_action_is_gated_by_today_inventory(self):
         patch = (ROOT / "xovi" / "3.28" / "nytQuickDownload.qmd").read_text()
-        self.assertIn("nytToday.ready && nytToday.missing && !nytToday.running", patch)
-        self.assertIn("visible: nytToday.ready && nytToday.missing && !nytToday.running", patch)
+        self.assertIn("nytToday.ready && nytToday.enabled && nytToday.missing && !nytToday.running", patch)
+        self.assertIn("visible: nytToday.ready && nytToday.enabled && nytToday.missing && !nytToday.running", patch)
         self.assertIn("running: nytQuickDownloadToggle.parent.visible", patch)
         self.assertNotIn("running: nytQuickDownloadToggle.visible", patch)
         self.assertIn('run("download-today")', patch)
-        self.assertIn('run("today-status")', patch)
+        self.assertIn('run("quick-status")', patch)
+        self.assertIn("enabled = result.include_quick_download === true", patch)
+        self.assertIn("if (!ready || !enabled || !missing || running) return", patch)
         self.assertIn("interval: 15000", patch)
         self.assertEqual(patch.count("INSERT SLOT nytQuickDownload"), 2)
+
+    def test_settings_include_quick_download_preference(self):
+        qml = (APP / "ui" / "NytCrossword.qml").read_text()
+        self.assertIn('text: "Include Quick Download button"', qml)
+        self.assertIn("quickDownloadInput.checked = result.include_quick_download", qml)
+        self.assertIn('"\\nINCLUDE_QUICK_DOWNLOAD=" + quickDownloadInput.checked', qml)
+        self.assertRegex(qml, r"id: quickDownloadInput\s+text: [^\n]+\s+checked: true")
 
     def test_settings_and_main_page_are_root_siblings(self):
         qml = (APP / "ui" / "NytCrossword.qml").read_text()
@@ -568,23 +651,33 @@ class AppLoadAppTests(unittest.TestCase):
         package = ROOT / "dist" / "xovi-nytcrossword-appload-app.zip"
         with zipfile.ZipFile(package) as archive:
             self.assertEqual(set(archive.namelist()), {
+                "nyt-crossword/LICENSE",
                 "nyt-crossword/manifest.json",
                 "nyt-crossword/icon.png",
                 "nyt-crossword/resources.rcc",
             })
             self.assertGreater(len(archive.read("nyt-crossword/resources.rcc")), 1000)
+            self.assertEqual(
+                archive.read("nyt-crossword/LICENSE").decode(),
+                (ROOT / "LICENSE").read_text(),
+            )
 
     def test_runtime_package_excludes_config_and_state(self):
         run_powershell_script(ROOT / "scripts" / "package-tablet.ps1")
         package = ROOT / "dist" / "xovi-nytcrossword-runtime.zip"
         with zipfile.ZipFile(package) as archive:
             self.assertEqual(set(archive.namelist()), {
+                "LICENSE",
                 "scripts/nytcrossword-run.sh",
                 "scripts/nytcrossword-shell.sh",
                 "scripts/nytcrossword-inventory.jq",
                 "config.example.env",
                 "xovi/3.28/nytQuickDownload.qmd",
             })
+            self.assertEqual(
+                archive.read("LICENSE").decode(),
+                (ROOT / "LICENSE").read_text(),
+            )
             for name in ("scripts/nytcrossword-run.sh", "scripts/nytcrossword-shell.sh"):
                 info = archive.getinfo(name)
                 self.assertEqual(info.external_attr >> 16, 0o100755)

@@ -11,6 +11,9 @@ foreach ($required in @("manifest.json", "icon.png", "application.qrc", "ui\NytC
     if (-not (Test-Path -LiteralPath (Join-Path $source $required))) {
         throw "Missing AppLoad source file: $required"
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $root "LICENSE") -PathType Leaf)) {
+        throw "Missing license file: LICENSE"
+    }
 }
 
 New-Item -ItemType Directory -Force -Path $outputDirectory, $buildDirectory | Out-Null
@@ -94,6 +97,7 @@ $zip = New-Object System.IO.Compression.ZipArchive(
 $encoding = New-Object System.Text.UTF8Encoding($false)
 try {
     $files = @(
+        @{ Path = (Join-Path $root "LICENSE"); Name = "nyt-crossword/LICENSE"; Binary = $false; Mode = 33188 }
         @{ Path = (Join-Path $source "manifest.json"); Name = "nyt-crossword/manifest.json"; Binary = $false; Mode = 33188 }
         @{ Path = (Join-Path $source "icon.png"); Name = "nyt-crossword/icon.png"; Binary = $true; Mode = 33188 }
         @{ Path = $resources; Name = "nyt-crossword/resources.rcc"; Binary = $true; Mode = 33188 }

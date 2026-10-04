@@ -45,6 +45,13 @@ already present. Pressing it runs `download-today`, which rechecks under the
 import lock and imports only a missing crossword. Errors and completion use
 native notifications. Detection uses the same naming/folder rules as the app.
 `today-status` performs the read-only check using the tablet's local date.
+The **Include Quick Download button** setting defaults to enabled. Set it to
+false in the app's Settings or set `INCLUDE_QUICK_DOWNLOAD=false` in `config.env`
+to hide the Quick Settings button without removing the QMD. Its `quick-status`
+check skips the library scan when disabled. Changes are picked up on the next
+15-second check while Quick Settings is visible; no restart is needed to change
+the preference once the updated QMD is loaded. Downloads inside the app are
+unaffected.
 
 ```sh
 sh /home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh version
@@ -117,7 +124,8 @@ Last Week (the previous complete Sunday–Saturday week), and Last Month
 while retaining the 31-day limit. Existing library files are not moved.
 
 The AppLoad app's **Settings** screen edits the NYT-S session cookie, base
-destination folder, and broker wait limit (1-300 seconds). Leave the masked
+destination folder, broker wait limit (1-300 seconds), and whether the NYT Quick
+Download button is included in Quick Settings. Leave the masked
 cookie field blank to preserve the saved cookie. Settings are saved locally,
 without putting credentials in command arguments or logs. The private draft
 is written inside the owner-only state directory, consumed on save, and the
@@ -220,3 +228,78 @@ python3 -m unittest discover -s tests -v
 
 Shell backend tests need a POSIX `sh` and are skipped on Windows; run those under
 WSL. The Python config tests use dummy credentials and do not make NYT requests.
+
+## License
+
+This app is licensed under the [MIT License](LICENSE). The license covers this
+project's software, not New York Times crossword PDFs or other third-party
+content. Downloaded content remains subject to its owners' terms and rights.
+Both tablet distribution archives include a copy of the license.
+
+## Vellum packaging
+
+The Vellum package installs the AppLoad app, shell backend, firmware 3.28 Quick
+Settings QMD, and an app-local, statically linked qpdf 12.4.2. The button can be
+disabled in Settings. Initial packaging targets `aarch64` on firmware
+`>=3.28,<3.29`; it does not claim tested support for reMarkable 1 or 2.
+Dependencies use Vellum's names: `appload`, `qt-command-executor`, `librarian`,
+`curl`, and `jq`. Bash, `flock`, and `stat` come from firmware and are checked
+before installation.
+
+Build on Windows with Docker configured for ARM64 Linux containers:
+
+```powershell
+# Local working-copy build, explicitly NOT suitable for publication/submission:
+.\scripts\package-vellum.ps1 -Local
+
+# Release build from an already published full 40-character app commit:
+.\scripts\package-vellum.ps1 -Commit <published-commit>
+
+# Independently check the release archive's exact install-file list:
+.\scripts\verify-vellum-package.ps1
+```
+
+The build compiles qpdf and its zlib/JPEG dependencies from source with musl and
+the GCC runtime linked statically. It validates a two-page PDF merge, compiles
+QML resources using RCC format version 2, and stages only an explicit install
+file list. It includes the app license, dependency licenses/notices, build
+provenance, source URLs, and source checksums. No NYT content, personal cookie,
+configuration, or state is packaged.
+
+The bundled PDF merger is based in part on the work of the Independent JPEG
+Group.
+
+Output is under `dist/vellum/`: the release archive
+`xovi-nytcrossword-0.3.0-aarch64.tar.gz` and a generated
+`packages/xovi-nytcrossword/VELBUILD`. Each build needs a fresh `app-source`
+staging directory; keep the previous outputs separately before rebuilding.
+Alternatively, pass `-OutputDirectory .\dist\vellum-release` for a separate build.
+A release build fetches the published commit, not uncommitted local files.
+Do not publish a `-Local` archive: its provenance and recipe deliberately say
+`local`.
+
+After publishing the app changes, build against their commit and upload the
+archive to this app's `v0.3.0` GitHub release. Copy only the generated `VELBUILD`
+into `packages/xovi-nytcrossword/` in a fork of
+[Vellum](https://github.com/vellum-dev/vellum). The release recipe fetches that
+archive and checks its SHA-512 checksum; it does not cross-compile in Vellum CI.
+Run Vellum's tools from that fork:
+
+```sh
+./scripts/lint-packages.sh xovi-nytcrossword --apkbuild-lint
+./scripts/build-package.sh xovi-nytcrossword aarch64
+```
+
+Test the signed APK on a tablet, including settings, button visibility, Today
+and multi-day imports, upgrade, and removal. Normal removal preserves private
+`config.env` and `state/`; `vellum purge` removes them. Library PDFs are never
+removed by package hooks. Do not run the manual ZIP deployment script over a
+Vellum-managed installation.
+
+Follow Vellum's [contribution and testing process](https://github.com/vellum-dev/vellum#contributing):
+one package per PR, maintainers publish to testing, then test with
+`vellum testing enable`, `vellum update`, and
+`vellum add xovi-nytcrossword@testing`. Resolve review conversations and personally
+comment `/ready-for-review` when testing is complete. Disable testing afterwards.
+Vellum requires human-authored commits and personally submitted PRs with
+descriptions and follow-up comments written without an LLM.
