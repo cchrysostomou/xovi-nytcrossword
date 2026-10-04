@@ -3,7 +3,7 @@
 # exactly one JSON object on stdout.
 set -eu
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 CONFIG="${NYTCROSSWORD_CONFIG:-}"
 STATE_DIR="${NYTCROSSWORD_STATE_DIR:-/home/root/xovi-nytcrossword/state}"
 WORK=""
@@ -349,8 +349,10 @@ cmd_view() {
   "$JQ" -cn --argjson dates "$(cat "$WORK/inventory.json")" \
     --argjson groups "$(groups_json)" --argjson count "$COUNT" \
     --argjson missing "$MISSING_COUNT" --argjson merge "$merge_required" \
+    --argjson quick "${QUICK_STATUS:-false}" \
     '{ok:true,count:$count,missing_count:$missing,present_count:($count-$missing),
-      dates:$dates,groups:$groups,merge_required:$merge}' ||
+      dates:$dates,groups:$groups,merge_required:$merge}
+      + (if $quick then {include_quick_download:true} else {} end)' ||
     fail library_error "Could not render the range inventory."
 }
 
@@ -564,6 +566,16 @@ settings_directory() {
     fail state_error "Could not protect the settings directory."
 }
 
+quick_download_setting() {
+  local value
+  value=$(config_value INCLUDE_QUICK_DOWNLOAD)
+  case "$value" in
+    "") QUICK_DOWNLOAD_ENABLED=true ;;
+    true|false) QUICK_DOWNLOAD_ENABLED=$value ;;
+    *) fail invalid_config "INCLUDE_QUICK_DOWNLOAD must be true or false." ;;
+  esac
+}
+
 cmd_settings() {
   settings_directory
   base=$(config_value CROSSWORD_FOLDER)
@@ -571,10 +583,11 @@ cmd_settings() {
   [ -n "$base" ] || base=/Crosswords
   timeout_s=$(config_value BROKER_TIMEOUT_S)
   [ -n "$timeout_s" ] || timeout_s=30
+  quick_download_setting
   configured=false
   [ -n "$(config_value NYT_S_COOKIE)" ] && configured=true
-  printf '{"ok":true,"configured":%s,"folder":"%s","broker_timeout":"%s"}\n' \
-    "$configured" "$(json_escape "$base")" "$(json_escape "$timeout_s")"
+  printf '{"ok":true,"configured":%s,"folder":"%s","broker_timeout":"%s","include_quick_download":%s}\n' \
+    "$configured" "$(json_escape "$base")" "$(json_escape "$timeout_s")" "$QUICK_DOWNLOAD_ENABLED"
 }
 
 cmd_settings_apply() {
@@ -591,9 +604,18 @@ cmd_settings_apply() {
   base=$(config_value CROSSWORD_FOLDER)
   timeout_s=$(config_value BROKER_TIMEOUT_S)
   cookie=$(config_value NYT_S_COOKIE)
+  quick_download=$(config_value INCLUDE_QUICK_DOWNLOAD)
   CONFIG=$original_config
+  if [ -z "$quick_download" ]; then
+    quick_download_setting
+    quick_download=$QUICK_DOWNLOAD_ENABLED
+  fi
   rm -f -- "$draft" || fail state_error "Could not remove the settings draft."
   validate_folder "$base"
+  case "$quick_download" in
+    true|false) ;;
+    *) fail invalid_config "INCLUDE_QUICK_DOWNLOAD must be true or false." ;;
+  esac
   printf '%s' "$timeout_s" | grep -Eq '^[1-9][0-9]{0,2}$' &&
     [ "$timeout_s" -le 300 ] ||
     fail invalid_config "Broker wait must be between 1 and 300 seconds."
@@ -605,7 +627,7 @@ cmd_settings_apply() {
   temporary=$(mktemp "$CONFIG.XXXXXX") ||
     fail state_error "Could not create the private configuration."
   if [ -f "$CONFIG" ]; then
-    if ! sed '/^[[:space:]]*CROSSWORD_FOLDER[[:space:]]*=/d; /^[[:space:]]*BROKER_TIMEOUT_S[[:space:]]*=/d' "$CONFIG" >"$temporary"; then
+    if ! sed '/^[[:space:]]*CROSSWORD_FOLDER[[:space:]]*=/d; /^[[:space:]]*BROKER_TIMEOUT_S[[:space:]]*=/d; /^[[:space:]]*INCLUDE_QUICK_DOWNLOAD[[:space:]]*=/d' "$CONFIG" >"$temporary"; then
       rm -f -- "$temporary"
       fail state_error "Could not read the existing configuration."
     fi
@@ -616,7 +638,8 @@ cmd_settings_apply() {
     mv -- "$temporary.filtered" "$temporary"
     printf '\nNYT_S_COOKIE=%s\n' "$cookie" >>"$temporary"
   fi
-  printf '\nCROSSWORD_FOLDER=%s\nBROKER_TIMEOUT_S=%s\n' "$base" "$timeout_s" >>"$temporary"
+  printf '\nCROSSWORD_FOLDER=%s\nBROKER_TIMEOUT_S=%s\nINCLUDE_QUICK_DOWNLOAD=%s\n' \
+    "$base" "$timeout_s" "$quick_download" >>"$temporary"
   chmod 600 "$temporary" && mv -f -- "$temporary" "$CONFIG" ||
     fail state_error "Could not save the private configuration."
   exec 6>&-
@@ -732,10 +755,18 @@ case "$command" in
   view) cmd_view "$@" ;;
   import) cmd_import "$@" ;;
   import-missing) IMPORT_MISSING=true; cmd_import "$@" ;;
-  today-status|download-today)
+  quick-status|today-status|download-today)
+    if [ "$command" = quick-status ]; then
+      quick_download_setting
+      if [ "$QUICK_DOWNLOAD_ENABLED" = false ]; then
+        printf '%s\n' '{"ok":true,"include_quick_download":false}'
+        exit 0
+      fi
+      QUICK_STATUS=true
+    fi
     today=$(date '+%Y-%m-%d') || fail missing_dependency "Could not read today's date."
     puzzle_id_for_iso_date "$today"
-    if [ "$command" = today-status ]; then
+    if [ "$command" != download-today ]; then
       cmd_view "$today" "$today" "$PUZZLE_ID_RESULT"
     else
       IMPORT_MISSING=true

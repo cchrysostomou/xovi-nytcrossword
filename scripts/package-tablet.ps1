@@ -7,6 +7,7 @@ $output = Join-Path $outputDirectory "xovi-nytcrossword-runtime.zip"
 # The runtime archive never contains config.env or state/, so redeploying keeps
 # the tablet's existing configuration.
 $files = @(
+    @{ Path = "LICENSE"; Mode = 33188 }
     @{ Path = "scripts\nytcrossword-run.sh"; Mode = 33261 }
     @{ Path = "scripts\nytcrossword-shell.sh"; Mode = 33261 }
     @{ Path = "scripts\nytcrossword-inventory.jq"; Mode = 33188 }

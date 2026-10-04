@@ -5,9 +5,9 @@ SLOT nytQuickDownload
     INSERT {
         ~&10845406345867313529&~ {
             ~&5972374&~: nytQuickDownloadToggle
-            visible: nytToday.ready && nytToday.missing && !nytToday.running
+            visible: nytToday.ready && nytToday.enabled && nytToday.missing && !nytToday.running
             ~&8399601734642709923&~: "qrc:/ark/icons/download"
-            ~&233726547792244&~: nytToday.ready && nytToday.missing && !nytToday.running
+            ~&233726547792244&~: nytToday.ready && nytToday.enabled && nytToday.missing && !nytToday.running
             ~&7713561545874130&~: nytToday.running
 
             Rectangle {
@@ -28,7 +28,7 @@ SLOT nytQuickDownload
             AsyncCommandExecutor {
                 ~&5972374&~: nytTodayExecutor
                 command: "sh"
-                arguments: ["/home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh", "today-status"]
+                arguments: ["/home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh", "quick-status"]
                 onStdOutAvailable: function(chunk) { nytToday.stdout += chunk; }
                 onRunningChanged: {
                     if (!running && nytToday.launched) nytToday.finish();
@@ -40,6 +40,7 @@ SLOT nytQuickDownload
                 property bool launched: false
                 property bool running: false
                 property bool ready: false
+                property bool enabled: true
                 property bool missing: false
                 property string action: ""
                 property string stdout: ""
@@ -64,7 +65,7 @@ SLOT nytQuickDownload
                     }
                 }
                 function start() {
-                    if (!ready || !missing || running) return;
+                    if (!ready || !enabled || !missing || running) return;
                     notify("NYT: downloading today's crossword");
                     run("download-today");
                 }
@@ -83,9 +84,10 @@ SLOT nytQuickDownload
                     }
                     if (action === "download-today") {
                         notify(result.count ? "NYT: today's crossword imported" : "NYT: already present");
-                        run("today-status");
+                        run("quick-status");
                     } else {
-                        missing = result.missing_count > 0;
+                        enabled = result.include_quick_download === true;
+                        missing = enabled && result.missing_count > 0;
                         ready = true;
                     }
                 }
@@ -97,7 +99,7 @@ SLOT nytQuickDownload
                 running: nytQuickDownloadToggle.parent.visible
                 triggeredOnStart: true
                 onTriggered: {
-                    if (!nytToday.running) nytToday.run("today-status");
+                    if (!nytToday.running) nytToday.run("quick-status");
                 }
             }
             ~&254542236275632405&~: nytToday.start()
