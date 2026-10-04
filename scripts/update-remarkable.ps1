@@ -67,6 +67,13 @@ mkdir -p "$runtime" "$appload"
 # The runtime archive deliberately contains no config.env or state.
 unzip -oq "$stage/xovi-nytcrossword-runtime.zip" -d "$runtime"
 chmod 755 "$runtime/scripts/"*.sh
+if grep -q 'IMG_VERSION="3\.28\.' /etc/os-release; then
+    qmd=/home/root/xovi/exthome/qt-resource-rebuilder
+    test -d "$qmd"
+    cp "$runtime/xovi/3.28/nytQuickDownload.qmd" "$qmd/nytQuickDownload.qmd"
+else
+    printf '%s\n' "Quick Settings patch skipped: requires firmware 3.28."
+fi
 
 rm -rf "$stage/appload"
 mkdir -p "$stage/appload"

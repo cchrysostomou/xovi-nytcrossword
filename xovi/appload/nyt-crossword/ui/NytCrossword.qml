@@ -92,6 +92,12 @@ Rectangle {
             startDate = addDays(today, -today.getDay());
         } else if (preset === "month") {
             startDate = new Date(today.getFullYear(), today.getMonth(), 1, 12, 0, 0);
+        } else if (preset === "last-week") {
+            endDate = addDays(today, -today.getDay() - 1);
+            startDate = addDays(endDate, -6);
+        } else if (preset === "last-month") {
+            startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1, 12, 0, 0);
+            endDate = new Date(today.getFullYear(), today.getMonth(), 0, 12, 0, 0);
         } else {
             startDate = today;
         }
@@ -102,7 +108,6 @@ Rectangle {
         selectedPreset = "custom";
         var changed = addDays(startDate, amount);
         if (changed.getTime() <= endDate.getTime() &&
-                changed.getFullYear() === endDate.getFullYear() &&
                 Math.round((endDate.getTime() - changed.getTime()) / 86400000) < 31) {
             startDate = changed;
             requestPreview();
@@ -115,7 +120,6 @@ Rectangle {
         var today = localToday();
         if (changed.getTime() >= startDate.getTime() &&
                 changed.getTime() <= today.getTime() &&
-                changed.getFullYear() === startDate.getFullYear() &&
                 Math.round((changed.getTime() - startDate.getTime()) / 86400000) < 31) {
             endDate = changed;
             requestPreview();
@@ -190,7 +194,7 @@ Rectangle {
             resultMessage = "Imported " + result.count +
                 (result.count === 1 ? " puzzle" : " puzzles") +
                 " into " + result.documents.length +
-                (result.documents.length === 1 ? " monthly PDF" : " monthly PDFs");
+                (result.documents.length === 1 ? " weekly PDF" : " weekly PDFs");
             appendLog(resultMessage);
             requestPreview();
         }
@@ -341,10 +345,12 @@ Rectangle {
                 model: [
                     { key: "today", label: "Today" },
                     { key: "week", label: "This Week" },
-                    { key: "month", label: "This Month" }
+                    { key: "month", label: "This Month" },
+                    { key: "last-week", label: "Last Week" },
+                    { key: "last-month", label: "Last Month" }
                 ]
                 Rectangle {
-                    width: (parent.width - 2 * 12) / 3
+                    width: (parent.width - 4 * 12) / 5
                     height: 64
                     color: app.selectedPreset === modelData.key ? "black" : "white"
                     border.color: "black"
@@ -353,7 +359,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: modelData.label
                         color: app.selectedPreset === modelData.key ? "white" : "black"
-                        font.pixelSize: 23
+                        font.pixelSize: 20
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -382,11 +388,18 @@ Rectangle {
                     font.pixelSize: 22
                     font.bold: true
                 }
-                Text {
-                    text: app.destination ? "Destination: " + app.destination : "Calculating destination..."
-                    font.pixelSize: 19
+                Flickable {
                     width: parent.width
-                    wrapMode: Text.WordWrap
+                    height: 65
+                    clip: true
+                    contentHeight: destinationsText.paintedHeight
+                    Text {
+                        id: destinationsText
+                        width: parent.width
+                        text: app.destination ? "Destination: " + app.destination : "Calculating destination..."
+                        font.pixelSize: 19
+                        wrapMode: Text.WordWrap
+                    }
                 }
                 Row {
                     spacing: 12

@@ -150,8 +150,6 @@ validate_range() {
   first_date=$(printf '%s\n%s\n' "$START_DATE" "$END_DATE" | sort | head -n 1)
   [ "$first_date" = "$START_DATE" ] ||
     fail invalid_range "The start date must not be after the end date." 2
-  [ "${START_DATE%??????}" = "${END_DATE%??????}" ] ||
-    fail invalid_range "A crossword collection cannot span multiple years." 2
 
   today=$(date '+%Y-%m-%d') ||
     fail missing_dependency "The date command is required."
@@ -208,22 +206,47 @@ destination_folder() {
   local month=${END_DATE:5:2}
   local names=(January February March April May June July August September October November December)
   year=${END_DATE%%-*}
-  DESTINATION="$base/$year/${month}_${names[$((10#$month - 1))]}"
+  LEGACY_MONTH_DESTINATION="$base/$year/${month}_${names[$((10#$month - 1))]}"
+  MONTH_DESTINATION="$base/NYT_Cwd_$year/${month}_${names[$((10#$month - 1))]}"
+  local y=$((10#$year)) m=$((10#$month)) d=$((10#${END_DATE:8:2}))
+  local offsets=(0 3 2 5 0 3 5 1 4 6 2 4)
+  local weekday week_start week_end last_day cursor
+  # Gregorian weekday, with Sunday = 0; avoids GNU date requirements on-device.
+  if ((m < 3)); then y=$((y - 1)); fi
+  weekday=$(((y + y/4 - y/100 + y/400 + offsets[m-1] + d) % 7))
+  week_start=$((d - weekday)); week_end=$((d + 6 - weekday))
+  ((week_start >= 1)) || week_start=1
+  cursor="${END_DATE:0:7}-01"
+  while :; do
+    last_day=$((10#${cursor:8:2}))
+    next_calendar_date "$cursor"
+    [[ ${NEXT_DATE:0:7} == "${END_DATE:0:7}" ]] || break
+    cursor=$NEXT_DATE
+  done
+  ((week_end <= last_day)) || week_end=$last_day
+  local week_folder
+  printf -v week_folder '%s-%s-%02d-%02d' "$year" "$month" "$week_start" "$week_end"
+  DESTINATION="$MONTH_DESTINATION/$week_folder"
+  LEGACY_WEEK_DESTINATION="$LEGACY_MONTH_DESTINATION/$week_folder"
   validate_folder "$DESTINATION"
 }
 
 plan_groups() {
   local cursor=$START_DATE id key previous="" index=-1
+  local saved_end=$END_DATE
   GROUP_STARTS=(); GROUP_ENDS=(); GROUP_IDS=(); GROUP_COUNTS=(); GROUP_DESTINATIONS=()
   local ids
   IFS=, read -r -a ids <<<"$PUZZLE_IDS"
   for id in "${ids[@]}"; do
-    key=${cursor:0:7}
+    END_DATE=$cursor
+    destination_folder
+    key=$DESTINATION
     if [ "$key" != "$previous" ]; then
       index=$((index + 1))
       GROUP_STARTS[index]=$cursor
       GROUP_IDS[index]=""
       GROUP_COUNTS[index]=0
+      GROUP_DESTINATIONS[index]=$DESTINATION
       previous=$key
     fi
     GROUP_ENDS[index]=$cursor
@@ -231,12 +254,6 @@ plan_groups() {
     GROUP_COUNTS[index]=$((GROUP_COUNTS[index] + 1))
     next_calendar_date "$cursor"
     cursor=$NEXT_DATE
-  done
-  local saved_end=$END_DATE
-  for index in "${!GROUP_STARTS[@]}"; do
-    END_DATE=${GROUP_ENDS[index]}
-    destination_folder
-    GROUP_DESTINATIONS[index]=$DESTINATION
   done
   END_DATE=$saved_end
 }
@@ -271,8 +288,10 @@ scan_range() {
   for id in "${ids[@]}"; do
     END_DATE=$cursor
     destination_folder
-    printf '%s{"date":"%s","puzzle_id":"%s","destination":"%s"}' \
-      "$separator" "$cursor" "$id" "$(json_escape "$DESTINATION")" >>"$WORK/dates.json"
+    printf '%s{"date":"%s","puzzle_id":"%s","destination":"%s","legacy_destinations":["%s","%s","%s"]}' \
+      "$separator" "$cursor" "$id" "$(json_escape "$DESTINATION")" \
+      "$(json_escape "$MONTH_DESTINATION")" "$(json_escape "$LEGACY_MONTH_DESTINATION")" \
+      "$(json_escape "$LEGACY_WEEK_DESTINATION")" >>"$WORK/dates.json"
     separator=,
     next_calendar_date "$cursor"; cursor=$NEXT_DATE
   done
@@ -387,7 +406,11 @@ download_puzzles() {
 }
 
 merge_puzzles() {
-  MERGED_PDF="$WORK/NYT Crosswords $START_DATE to $END_DATE.pdf"
+  if [ "$START_DATE" = "$END_DATE" ]; then
+    MERGED_PDF="$WORK/NYT_Cwd_$START_DATE.pdf"
+  else
+    MERGED_PDF="$WORK/NYT_Cwd_$START_DATE-$END_DATE.pdf"
+  fi
   old_ifs=$IFS
   IFS=,
   set -- $PUZZLE_IDS
@@ -709,6 +732,16 @@ case "$command" in
   view) cmd_view "$@" ;;
   import) cmd_import "$@" ;;
   import-missing) IMPORT_MISSING=true; cmd_import "$@" ;;
+  today-status|download-today)
+    today=$(date '+%Y-%m-%d') || fail missing_dependency "Could not read today's date."
+    puzzle_id_for_iso_date "$today"
+    if [ "$command" = today-status ]; then
+      cmd_view "$today" "$today" "$PUZZLE_ID_RESULT"
+    else
+      IMPORT_MISSING=true
+      cmd_import "$today" "$today" "$PUZZLE_ID_RESULT"
+    fi
+    ;;
   "") fail usage_error "Usage: nytcrossword-run.sh <version|status|preview|import>" 2 ;;
   *) fail unknown_command "Unknown command: $command" 2 ;;
 esac
