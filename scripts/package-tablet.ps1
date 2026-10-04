@@ -9,6 +9,7 @@ $output = Join-Path $outputDirectory "xovi-nytcrossword-runtime.zip"
 $files = @(
     @{ Path = "scripts\nytcrossword-run.sh"; Mode = 33261 }
     @{ Path = "scripts\nytcrossword-shell.sh"; Mode = 33261 }
+    @{ Path = "scripts\nytcrossword-inventory.jq"; Mode = 33188 }
     @{ Path = "config.example.env"; Mode = 33188 }
 )
 foreach ($file in $files) {
