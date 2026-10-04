@@ -1,0 +1,5 @@
+<RCC>
+    <qresource>
+        <file>ui/NytCrossword.qml</file>
+    </qresource>
+</RCC>

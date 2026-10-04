@@ -1,0 +1,10 @@
+{
+  "name": "NYT Crossword",
+  "loadsBackend": false,
+  "entry": "/ui/NytCrossword.qml",
+  "id": "nyt-crossword",
+  "supportsScaling": true,
+  "canHaveMultipleFrontends": false,
+  "aspectRatio": "original",
+  "width": "original"
+}

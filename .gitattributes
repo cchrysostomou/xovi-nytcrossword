@@ -1,0 +1,4 @@
+*.sh text eol=lf
+*.qml text eol=lf
+*.qrc text eol=lf
+*.png binary
