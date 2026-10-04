@@ -11,6 +11,7 @@ $files = @(
     @{ Path = "scripts\nytcrossword-shell.sh"; Mode = 33261 }
     @{ Path = "scripts\nytcrossword-inventory.jq"; Mode = 33188 }
     @{ Path = "config.example.env"; Mode = 33188 }
+    @{ Path = "xovi\3.28\nytQuickDownload.qmd"; Mode = 33188 }
 )
 foreach ($file in $files) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $file.Path) -PathType Leaf)) {

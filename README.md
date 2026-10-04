@@ -36,6 +36,16 @@ and renders structured JSON output. Python is not required on the tablet.
 
 ## Backend commands
 
+On firmware 3.28 the runtime package includes `nytQuickDownload.qmd`, installed
+by the deployment script into qt-resource-rebuilder. It adds an **NYT** Quick
+Settings button alongside other quick actions. Restart xochitl with XOVI to
+load the patch. The button scans today's library coverage when visible and
+every 15 seconds, and is hidden until a successful check or if today is
+already present. Pressing it runs `download-today`, which rechecks under the
+import lock and imports only a missing crossword. Errors and completion use
+native notifications. Detection uses the same naming/folder rules as the app.
+`today-status` performs the read-only check using the tablet's local date.
+
 ```sh
 sh /home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh version
 sh /home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh status
@@ -46,10 +56,11 @@ sh /home/root/xovi-nytcrossword/scripts/nytcrossword-run.sh \
 ```
 
 `status` reports cookie configuration, `curl`, PDF-merger, and broker readiness.
-`preview` validates a one-to-31-day, single-year range without downloading.
+`preview` validates a one-to-31-day range without downloading.
 `import` downloads every requested PDF, validates it, groups by calendar month,
-and merges each month's selection in date order. It ensures each monthly folder
-and imports one document per month. Errors are one
+and splits each month into Sunday–Saturday weeks, merging each selected weekly
+group in date order. It ensures each weekly folder and imports one document
+per contiguous group. Errors are one
 `{"ok":false,"error":"<code>","message":"<text>"}` object with a non-zero exit
 code. A failed date aborts the entire collection rather than importing a partial
 range.
@@ -62,9 +73,15 @@ parses `KEY=value` lines and never sources the file. Packages never contain
 `config.env` or `state/`, so redeploying keeps your settings.
 
 Set `CROSSWORD_FOLDER` to the base library path. Imports automatically use a
-year/month folder such as `/Crosswords/2026/10_October`. A range crossing a
-month boundary creates separate PDFs in each month's folder, named
-`NYT Crosswords <first-selected-date> to <last-selected-date>.pdf`.
+year/month/week folder such as
+`/Crosswords/NYT_Cwd_2026/10_October/2026-10-04-10`. Year folders use
+`NYT_Cwd_{year}`. Week folder dates cover the
+Sunday–Saturday week clipped to that calendar month, not just the selected
+dates. A cross-month week uses separate paths, for example
+`NYT_Cwd_2026/09_September/2026-09-27-30` and `NYT_Cwd_2026/10_October/2026-10-01-03`.
+PDFs contain only the selected dates and are named
+`NYT_Cwd_YYYY-MM-DD.pdf` for a single date or
+`NYT_Cwd_YYYY-MM-DD-YYYY-MM-DD.pdf` for a range.
 `preview` returns a `groups` array with dates, puzzle counts, and destinations;
 successful imports return a `documents` array. All downloads and merges finish
 before library imports begin. If a later monthly import fails, earlier imports
@@ -82,11 +99,22 @@ are never included in a new PDF's date-range filename.
 
 Detection requires `jq` (also detected at `/home/root/.vellum/bin/jq`) and the
 local xochitl library. It recognizes PDFs named
-`NYT Crosswords YYYY-MM-DD to YYYY-MM-DD` in the configured year/month folders.
+`NYT_Cwd_YYYY-MM-DD` or `NYT_Cwd_YYYY-MM-DD-YYYY-MM-DD` in the configured
+year/month/week folders (with or without `.pdf`). Existing PDFs directly in
+the corresponding year/month folder also count toward coverage. Previous
+numeric-year folders (with or without week subfolders) remain recognized;
+existing files and folders are not renamed. The previous
+`NYT Crosswords YYYY-MM-DD to YYYY-MM-DD` names remain recognized; existing
+files are not renamed.
 Trashed/deleted documents and missing PDF files do not count. Renamed PDFs,
 legacy folders, and manually imported files with different names are not
 automatically recognized. The filename is treated as the date-coverage record;
 the app does not inspect the crossword content of individual PDF pages.
+
+Presets include Today, This Week (Sunday through today), This Month,
+Last Week (the previous complete Sunday–Saturday week), and Last Month
+(the previous complete calendar month). Ranges can cross a year boundary,
+while retaining the 31-day limit. Existing library files are not moved.
 
 The AppLoad app's **Settings** screen edits the NYT-S session cookie, base
 destination folder, and broker wait limit (1-300 seconds). Leave the masked

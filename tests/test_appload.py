@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import os
 import re
+from datetime import date
 import subprocess
 import tempfile
 import threading
@@ -39,6 +40,35 @@ def run_backend(*arguments, config=None, extra_env=None):
 
 @unittest.skipIf(os.name == "nt", "the shell backend tests need a POSIX sh (run under WSL)")
 class ShellBackendTests(unittest.TestCase):
+    def test_today_action_skips_an_existing_crossword(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = self.create_inventory_library(root)
+            today = date.today().isoformat()
+            names = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"]
+            (library / "year.metadata").write_text(json.dumps({
+                "type": "CollectionType", "visibleName": today[:4], "parent": "base"}))
+            (library / "month.metadata").write_text(json.dumps({
+                "type": "CollectionType", "parent": "year",
+                "visibleName": today[5:7] + "_" + names[int(today[5:7]) - 1]}))
+            (library / "existing.metadata").write_text(json.dumps({
+                "type": "DocumentType", "parent": "month",
+                "visibleName": f"NYT Crosswords {today} to {today}"}))
+            env = {"NYTCROSSWORD_LIBRARY_DIR": str(library),
+                   "NYTCROSSWORD_STATE_DIR": str(root / "state")}
+            code, payload = run_backend("today-status", extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["dates"][0]["date"], today)
+            self.assertEqual(payload["missing_count"], 0)
+            code, payload = run_backend("download-today", extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["count"], 0)
+            (library / "existing.pdf").unlink()
+            code, payload = run_backend("today-status", extra_env=env)
+            self.assertEqual(code, 0)
+            self.assertEqual(payload["missing_count"], 1)
+
     def create_inventory_library(self, root):
         library = root / "library"
         library.mkdir()
@@ -76,6 +106,48 @@ class ShellBackendTests(unittest.TestCase):
                 "view", "2026-10-01", "2026-10-02",
                 "Oct0126,Oct0226", extra_env=env)
             self.assertEqual(payload["missing_count"], 2)
+
+    def test_inventory_recognizes_new_single_and_range_names(self):
+        for name, present in [
+            ("NYT_Cwd_2026-10-01", 1),
+            ("NYT_Cwd_2026-10-01.pdf", 1),
+            ("NYT_Cwd_2026-10-01-2026-10-02", 2),
+            ("NYT_Cwd_2026-10-01-2026-10-02.pdf", 2),
+            ("NYT Crosswords 2026-10-01 to 2026-10-02", 2),
+        ]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                library = self.create_inventory_library(root)
+                metadata = library / "existing.metadata"
+                record = json.loads(metadata.read_text())
+                record["visibleName"] = name
+                metadata.write_text(json.dumps(record))
+                code, payload = run_backend(
+                    "view", "2026-10-01", "2026-10-02", "Oct0126,Oct0226",
+                    extra_env={"NYTCROSSWORD_LIBRARY_DIR": str(library),
+                               "NYTCROSSWORD_STATE_DIR": str(root / "state")})
+                self.assertEqual(code, 0, payload)
+                self.assertEqual(payload["present_count"], present)
+
+    def test_inventory_recognizes_week_folder_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = self.create_inventory_library(root)
+            (library / "week.metadata").write_text(json.dumps({
+                "type": "CollectionType", "visibleName": "2026-10-01-03",
+                "parent": "month"}))
+            metadata = library / "existing.metadata"
+            record = json.loads(metadata.read_text())
+            record["parent"] = "week"
+            record["visibleName"] = "NYT_Cwd_2026-10-01-2026-10-02"
+            metadata.write_text(json.dumps(record))
+            code, payload = run_backend(
+                "view", "2026-10-01", "2026-10-02", "Oct0126,Oct0226",
+                extra_env={"NYTCROSSWORD_LIBRARY_DIR": str(library),
+                           "NYTCROSSWORD_STATE_DIR": str(root / "state")})
+            self.assertEqual(code, 0, payload)
+            self.assertEqual(payload["present_count"], 2)
+            self.assertEqual(payload["missing_count"], 0)
 
     def test_import_missing_does_nothing_when_all_present(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -190,11 +262,14 @@ class ShellBackendTests(unittest.TestCase):
             "start_date": "2026-10-01",
             "end_date": "2026-10-04",
             "count": 4,
-            "destination": "/Puzzles/2026/10_October",
+            "destination": "/Puzzles/NYT_Cwd_2026/10_October/2026-10-04-10",
             "merge_required": True,
             "groups": [{
-                "start_date": "2026-10-01", "end_date": "2026-10-04",
-                "count": 4, "destination": "/Puzzles/2026/10_October",
+                "start_date": "2026-10-01", "end_date": "2026-10-03",
+                "count": 3, "destination": "/Puzzles/NYT_Cwd_2026/10_October/2026-10-01-03",
+            }, {
+                "start_date": "2026-10-04", "end_date": "2026-10-04",
+                "count": 1, "destination": "/Puzzles/NYT_Cwd_2026/10_October/2026-10-04-10",
             }],
         })
 
@@ -314,8 +389,9 @@ class ShellBackendTests(unittest.TestCase):
         self.assertEqual(
             payload["document_uuid"],
             "22222222-2222-2222-2222-222222222222")
-        self.assertEqual(requests[0], ">eensureFolder:/Crosswords/2026/" +
-                         ("09_September" if cross_month else "10_October"))
+        self.assertEqual(requests[0], ">eensureFolder:/Crosswords/NYT_Cwd_2026/" +
+                         ("09_September/2026-09-27-30" if cross_month else
+                          "10_October/2026-10-01-03"))
         self.assertTrue(requests[1].startswith(">eimportDocument:"))
         self.assertIn(
             ",11111111-1111-1111-1111-111111111111", requests[1])
@@ -325,8 +401,14 @@ class ShellBackendTests(unittest.TestCase):
             self.assertEqual(len(downloads), 1)
             self.assertTrue(downloads[0].endswith("Oct0226.pdf"))
             self.assertEqual(merges, [])
+            self.assertIn("/NYT_Cwd_2026-10-02.pdf,", requests[1])
+        elif cross_month:
+            self.assertIn("/NYT_Cwd_2026-09-29-2026-09-30.pdf,", requests[1])
+            self.assertIn("/NYT_Cwd_2026-10-01-2026-10-02.pdf,", requests[3])
+        else:
+            self.assertIn("/NYT_Cwd_2026-10-01-2026-10-02.pdf,", requests[1])
         if cross_month:
-            self.assertEqual(requests[2], ">eensureFolder:/Crosswords/2026/10_October")
+            self.assertEqual(requests[2], ">eensureFolder:/Crosswords/NYT_Cwd_2026/10_October/2026-10-01-03")
             self.assertEqual(len(merges), 2)
             self.assertIn("Sep2926.pdf", merges[0])
             self.assertNotIn("Oct0126.pdf", merges[0])
@@ -340,9 +422,31 @@ class ShellBackendTests(unittest.TestCase):
         self.assertFalse(payload["merge_required"])
         self.assertEqual(payload["groups"], [
             {"start_date": "2026-09-30", "end_date": "2026-09-30",
-             "count": 1, "destination": "/Crosswords/2026/09_September"},
+             "count": 1, "destination": "/Crosswords/NYT_Cwd_2026/09_September/2026-09-27-30"},
             {"start_date": "2026-10-01", "end_date": "2026-10-01",
-             "count": 1, "destination": "/Crosswords/2026/10_October"},
+             "count": 1, "destination": "/Crosswords/NYT_Cwd_2026/10_October/2026-10-01-03"},
+        ])
+
+    def test_week_folder_calendar_boundaries(self):
+        cases = [
+            ("2024-02-29", "Feb2924", "2024/02_February/2024-02-25-29"),
+            ("2026-01-01", "Jan0126", "2026/01_January/2026-01-01-03"),
+            ("2026-09-26", "Sep2626", "2026/09_September/2026-09-20-26"),
+            ("2026-09-27", "Sep2726", "2026/09_September/2026-09-27-30"),
+        ]
+        for day, puzzle_id, folder in cases:
+            with self.subTest(day=day):
+                code, payload = run_backend("preview", day, day, puzzle_id)
+                self.assertEqual(code, 0)
+                self.assertEqual(payload["groups"][0]["destination"], "/Crosswords/NYT_Cwd_" + folder)
+
+    def test_range_crossing_year_is_split_into_correct_week_folders(self):
+        code, payload = run_backend(
+            "preview", "2025-12-31", "2026-01-01", "Dec3125,Jan0126")
+        self.assertEqual(code, 0)
+        self.assertEqual([g["destination"] for g in payload["groups"]], [
+            "/Crosswords/NYT_Cwd_2025/12_December/2025-12-28-31",
+            "/Crosswords/NYT_Cwd_2026/01_January/2026-01-01-03",
         ])
 
     def test_preview_rejects_missing_middle_dates(self):
@@ -405,6 +509,17 @@ class ShellBackendTests(unittest.TestCase):
 
 
 class AppLoadAppTests(unittest.TestCase):
+    def test_quick_action_is_gated_by_today_inventory(self):
+        patch = (ROOT / "xovi" / "3.28" / "nytQuickDownload.qmd").read_text()
+        self.assertIn("nytToday.ready && nytToday.missing && !nytToday.running", patch)
+        self.assertIn("visible: nytToday.ready && nytToday.missing && !nytToday.running", patch)
+        self.assertIn("running: nytQuickDownloadToggle.parent.visible", patch)
+        self.assertNotIn("running: nytQuickDownloadToggle.visible", patch)
+        self.assertIn('run("download-today")', patch)
+        self.assertIn('run("today-status")', patch)
+        self.assertIn("interval: 15000", patch)
+        self.assertEqual(patch.count("INSERT SLOT nytQuickDownload"), 2)
+
     def test_settings_and_main_page_are_root_siblings(self):
         qml = (APP / "ui" / "NytCrossword.qml").read_text()
         tokens = re.finditer(
@@ -444,6 +559,8 @@ class AppLoadAppTests(unittest.TestCase):
         self.assertIn('"import"', qml)
         self.assertIn("function puzzleIds()", qml)
         self.assertIn("function selectPreset(preset)", qml)
+        self.assertIn('preset === "last-week"', qml)
+        self.assertIn('preset === "last-month"', qml)
         self.assertNotIn("NYT-S=", qml)
 
     def test_appload_package_contains_only_installable_app_files(self):
@@ -466,6 +583,7 @@ class AppLoadAppTests(unittest.TestCase):
                 "scripts/nytcrossword-shell.sh",
                 "scripts/nytcrossword-inventory.jq",
                 "config.example.env",
+                "xovi/3.28/nytQuickDownload.qmd",
             })
             for name in ("scripts/nytcrossword-run.sh", "scripts/nytcrossword-shell.sh"):
                 info = archive.getinfo(name)
